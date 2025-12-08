@@ -4,6 +4,7 @@ import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
+import path from "path";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -58,8 +59,12 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   if (thumbnail.size > MAX_UPLOAD_SIZE) {
     throw new BadRequestError("File too large");
   }
+  if (!["image/png", "image/jpeg"].includes(thumbnail.type)) {
+    throw new BadRequestError(`Unsupported file type: ${thumbnail.type}`);
+  }
 
-  const type = thumbnail.type;
+  const type = thumbnail.type.split("/")[1];
+  console.log("thumbnail type:", type);
   const buffer = await thumbnail.arrayBuffer();
 
   const video = getVideo(cfg.db, videoId);
@@ -71,14 +76,15 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     mediaType: type,
   }); */
 
-  const data = Buffer.from(buffer).toString("base64");
+  const file = Bun.file(path.join(cfg.assetsRoot, `${video.id}.${type}`));
+  await Bun.write(file, buffer);
 
-  const thumbnailUrl = `data:${type};base64,${data}`;
+  const thumbnailUrl = `/assets/${video.id}.${type}`;
+  console.log("thumbnail URL:", thumbnailUrl);
   video.thumbnailURL = thumbnailUrl;
 
   updateVideo(cfg.db, video);
 
   const updatedVideo = getVideo(cfg.db, video.id);
-
   return respondWithJSON(200, updatedVideo);
 }
