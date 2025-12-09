@@ -79,7 +79,7 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const file = Bun.file(path.join(cfg.assetsRoot, `${video.id}.${type}`));
   await Bun.write(file, buffer);
 
-  const thumbnailUrl = `/assets/${video.id}.${type}`;
+  const thumbnailUrl = `http://localhost:8091/assets/${video.id}.${type}`;
   console.log("thumbnail URL:", thumbnailUrl);
   video.thumbnailURL = thumbnailUrl;
 
