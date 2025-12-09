@@ -45,11 +45,14 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const ext = ".mp4";
   const fileName = `${randomBytes(32).toString("hex")}${ext}`;
   const buffer = await videoFile.arrayBuffer();
-  const file = Bun.file(path.join(cfg.assetsRoot, fileName));
+  const filePath = path.join(cfg.assetsRoot, fileName);
+  const file = Bun.file(filePath);
   await Bun.write(file, buffer);
 
+  const aspectRatio = await getVideoAspectRatio(filePath);
+
   //Upload to S3
-  await cfg.s3Client.file(fileName).write(file, {
+  await cfg.s3Client.file(`${aspectRatio}/${fileName}`).write(file, {
     type: type,
   });
 
@@ -57,10 +60,127 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await file.delete();
 
   //Update video url
-  video.videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${fileName}`;
+  video.videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${aspectRatio}/${fileName}`;
 
   updateVideo(cfg.db, video);
   const updatedVideo = getVideo(cfg.db, videoId);
 
   return respondWithJSON(200, updatedVideo);
 }
+
+async function getVideoAspectRatio(
+  filePath: string
+): Promise<"landscape" | "portrait" | "other"> {
+  const proc = Bun.spawn({
+    cmd: [
+      "ffprobe",
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "json",
+      "-show_streams",
+      filePath,
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  await proc.exited;
+
+  if (proc.exitCode !== 0) {
+    const error = await new Response(proc.stderr).text();
+    throw new Error(`Failed to get video info: ${error}`);
+  }
+  const output = (await new Response(proc.stdout).json()) as StreamInfo;
+  const height = output.streams[0].height;
+  const width = output.streams[0].width;
+  if (!height || !width) {
+    throw new Error("Failed to get video dimensions");
+  }
+
+  const aspectRatio = width / height;
+  switch (true) {
+    case aspectRatio >= 1.7:
+      return "landscape";
+    case aspectRatio <= 0.6:
+      return "portrait";
+    default:
+      return "other";
+  }
+}
+
+type StreamInfo = {
+  programs: Array<any>;
+  streams: Array<{
+    index: number;
+    codec_name: string;
+    codec_long_name: string;
+    profile: string;
+    codec_type: string;
+    codec_tag_string: string;
+    codec_tag: string;
+    width: number;
+    height: number;
+    coded_width: number;
+    coded_height: number;
+    closed_captions: number;
+    film_grain: number;
+    has_b_frames: number;
+    sample_aspect_ratio: string;
+    display_aspect_ratio: string;
+    pix_fmt: string;
+    level: number;
+    color_range: string;
+    color_space: string;
+    color_transfer: string;
+    color_primaries: string;
+    chroma_location: string;
+    field_order: string;
+    refs: number;
+    is_avc: string;
+    nal_length_size: string;
+    id: string;
+    r_frame_rate: string;
+    avg_frame_rate: string;
+    time_base: string;
+    start_pts: number;
+    start_time: string;
+    duration_ts: number;
+    duration: string;
+    bit_rate: string;
+    bits_per_raw_sample: string;
+    nb_frames: string;
+    extradata_size: number;
+    disposition: {
+      default: number;
+      dub: number;
+      original: number;
+      comment: number;
+      lyrics: number;
+      karaoke: number;
+      forced: number;
+      hearing_impaired: number;
+      visual_impaired: number;
+      clean_effects: number;
+      attached_pic: number;
+      timed_thumbnails: number;
+      non_diegetic: number;
+      captions: number;
+      descriptions: number;
+      metadata: number;
+      dependent: number;
+      still_image: number;
+    };
+    tags: {
+      language: string;
+      handler_name: string;
+      vendor_id: string;
+      encoder: string;
+      timecode: string;
+    };
+  }>;
+};
