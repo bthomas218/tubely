@@ -2,9 +2,10 @@ import { getBearerToken, validateJWT } from "../auth";
 import { respondWithJSON } from "./json";
 import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
-import type { BunRequest } from "bun";
+import { file, type BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import path from "path";
+import { randomBytes } from "crypto";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -76,10 +77,11 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     mediaType: type,
   }); */
 
-  const file = Bun.file(path.join(cfg.assetsRoot, `${video.id}.${type}`));
+  const fileName = randomBytes(32).toString("base64url");
+  const file = Bun.file(path.join(cfg.assetsRoot, `${fileName}.${type}`));
   await Bun.write(file, buffer);
 
-  const thumbnailUrl = `http://localhost:8091/assets/${video.id}.${type}`;
+  const thumbnailUrl = `http://localhost:8091/assets/${fileName}.${type}`;
   console.log("thumbnail URL:", thumbnailUrl);
   video.thumbnailURL = thumbnailUrl;
 
