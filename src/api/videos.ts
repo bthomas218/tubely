@@ -3,7 +3,7 @@ import { BadRequestError, UserForbiddenError } from "./errors";
 import { type ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { getBearerToken, validateJWT } from "../auth";
-import { getVideo, updateVideo } from "../db/videos";
+import { getVideo, updateVideo, type Video } from "../db/videos";
 import { randomBytes } from "crypto";
 import path from "path";
 
@@ -63,12 +63,12 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await processedFile.delete();
 
   //Update video url
-  video.videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${aspectRatio}/${fileName}`;
+  video.videoURL = `${aspectRatio}/${fileName}`;
 
   updateVideo(cfg.db, video);
-  const updatedVideo = getVideo(cfg.db, videoId);
 
-  return respondWithJSON(200, updatedVideo);
+  const signedVideo = dbVideoToSignedVideo(cfg, video);
+  return respondWithJSON(200, signedVideo);
 }
 
 async function getVideoAspectRatio(
@@ -145,6 +145,22 @@ async function processVideoForFastStart(inputFilePath: string) {
   }
 
   return outputFilePath;
+}
+
+function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
+  const url = cfg.s3Client.presign(key, {
+    expiresIn: expireTime,
+  });
+  return url;
+}
+
+export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
+  if (!video.videoURL) {
+    return video;
+  }
+  const url = generatePresignedURL(cfg, video.videoURL, 3600); // 1 hour expiry
+  video.videoURL = url;
+  return video;
 }
 
 type StreamInfo = {
